@@ -23,9 +23,9 @@
 
 import RPi.GPIO as GPIO
 import Adafruit_DHT
-from MCP3008 import MCP3008
-import SDL_DS1307
+from gpiozero import MCP3008
 import time
+import datetime
 
 ##################################################################
 ##################### CUSTOMIZEABLE SETTINGS #####################
@@ -35,7 +35,7 @@ SETTINGS = {
     "LIGHT_FROM":       10,                     # from which time the light can be turned on (hour)
     "LIGHT_UNTIL":      20,                     # until which time (hour)
     "LIGHT_CHANNEL":    0,                      # of MCP3008
-    "LIGHT_THRESHOLD":  500,                    # if the analog Threshold is below any of those, the light will turn on
+    "LIGHT_THRESHOLD":  0.2,                    # if the analog Threshold is below any of those, the light will turn on
     "DHT_GPIO":         27,                     # GPIO Number (BCM) of the DHT Sensor
     "DHT_SENSOR":       Adafruit_DHT.DHT22,     # DHT11 or DHT22
     "TEMP_THRESHOLD":   23.0,                   # in Celcius. Above this value, the window will be opened by the servo
@@ -44,18 +44,12 @@ SETTINGS = {
     "PLANTS": [
         {
             "NAME":                 "Tomaten",
-            "MOISTURE_CHANNELS":    [1, 2],     # of MCP3008
+            "MOISTURE_CHANNELS":    [6],     # of MCP3008
             "MOISTURE_THRESHOLD":   450,        # if the average analog value of all sensors is above of this threshold, the Pump will turn on
             "WATER_PUMP_GPIO":      23,         # GPIO Number (BCM) for the Relais
             "WATERING_TIME":        10,         # Seconds, how long the pump should be turned on
-        },
-        {
-            "NAME":                 "Salat",
-            "MOISTURE_CHANNELS":    [3, 4],
-            "MOISTURE_THRESHOLD":   450,
-            "WATER_PUMP_GPIO":      24,
-            "WATERING_TIME":        12,
-        },
+        }
+      
     ]
 }
 ##################################################################
@@ -64,12 +58,8 @@ SETTINGS = {
 
 
 def readTime():
-    try:
-        ds1307 = SDL_DS1307.SDL_DS1307(1, 0x68)
-        return ds1307.read_datetime()
-    except:
-        # alternative: return the system-time:
-        return datetime.datetime.utcnow()
+    # alternative: return the system-time:
+    return datetime.datetime.utcnow()
     
 def checkLight():
     timestamp = readTime()
@@ -77,13 +67,13 @@ def checkLight():
     
     if SETTINGS["LIGHT_FROM"] <= timestamp.hour <= SETTINGS["LIGHT_UNTIL"]:
         # check light sensors
-        adc = MCP3008()
+        adc = MCP3008(SETTINGS["LIGHT_CHANNEL"])
         # read 10 times to avoid measuring errors
         value = 0
         for i in range(10):
-            value += adc.read( channel = SETTINGS["LIGHT_CHANNEL"] )
+            value += adc.value
         value /= 10.0
-        
+        print('light ', value)
         if value <= SETTINGS["LIGHT_THRESHOLD"]:
             # turn light on
             GPIO.setup(SETTINGS["LIGHT_GPIO"], GPIO.OUT, initial=GPIO.LOW) # Relay LOW = ON
@@ -97,25 +87,25 @@ def checkLight():
     
 def wateringPlants():
     # read moisture
-    adc = MCP3008()
     for plantObject in SETTINGS["PLANTS"]:
         value = 0
         for ch in plantObject["MOISTURE_CHANNELS"]:
+            adc = MCP3008(ch)
             # read 10 times to avoid measuring errors
             v = 0
             for i in range(10):
-                v += adc.read( channel = ch )
+                v += adc.value
             v /= 10.0
             value += v
         
         value /= float(len(plantObject["MOISTURE_CHANNELS"]))
-        
+	print('moisture', value)        
         if value > plantObject["MOISTURE_THRESHOLD"]:
             # turn pump on for some seconds
-            GPIO.setup(plantObject["WATER_PUMP_GPIO"], GPIO.OUT, initial=GPIO.LOW)
-            time.sleep(plantObject["WATERING_TIME"])
-            GPIO.output(plantObject["WATER_PUMP_GPIO"], GPIO.HIGH)
-
+#            GPIO.setup(plantObject["WATER_PUMP_GPIO"], GPIO.OUT, initial=GPIO.LOW)
+#            time.sleep(plantObject["WATERING_TIME"])
+#            GPIO.output(plantObject["WATER_PUMP_GPIO"], GPIO.HIGH)
+            print('PUMP ON')
 def checkWindow():
     # read remperature
     humidity, temperature = Adafruit_DHT.read_retry(SETTINGS["DHT_SENSOR"], SETTINGS["DHT_GPIO"])
@@ -143,6 +133,7 @@ if __name__ == '__main__':
         # execute functions
         checkLight()
         wateringPlants()
-        checkWindow()
-    except:
+        #checkWindow()
+    except Exception as e:
+        print(e)
         GPIO.cleanup()
